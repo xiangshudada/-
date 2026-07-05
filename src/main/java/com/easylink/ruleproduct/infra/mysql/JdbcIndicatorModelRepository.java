@@ -12,6 +12,7 @@ import com.easylink.ruleproduct.core.model.ReportMapping;
 import com.easylink.ruleproduct.core.model.RequirementScope;
 import com.easylink.ruleproduct.core.model.RiskSection;
 import com.easylink.ruleproduct.core.model.ThresholdProfile;
+import com.easylink.ruleproduct.core.model.VerificationItem;
 import com.easylink.ruleproduct.core.repository.IndicatorModelRepository;
 import com.easylink.ruleproduct.infra.json.JsonSupport;
 import java.sql.ResultSet;
@@ -86,13 +87,27 @@ public class JdbcIndicatorModelRepository implements IndicatorModelRepository {
 
     private InvestigationStep mapStep(ResultSet rs, String indicatorCode) throws SQLException {
         Long stepId = rs.getLong("id");
-        Map<String, Object> thresholdMap = jsonSupport.readMap(rs.getString("thresholds_json"));
-        ThresholdProfile thresholdProfile = new ThresholdProfile(
-                (String) thresholdMap.get("metric"),
-                jsonSupport.decimalValue(thresholdMap, "min"),
-                jsonSupport.decimalValue(thresholdMap, "max"),
-                thresholdMap
-        );
+        ThresholdProfile thresholdProfile = thresholdProfile(rs.getString("thresholds_json"));
+        List<VerificationItem> verificationItems = loadVerificationItems(stepId);
+        List<DataRequirement> dataRequirements = loadRequirements(stepId);
+        DecisionPolicy decisionPolicy = new DecisionPolicy(rs.getString("judgment_basis"), rs.getBoolean("manual_review_required"));
+        ReportMapping reportMapping = new ReportMapping(rs.getString("report_field"), rs.getString("result_target"));
+        if (verificationItems.isEmpty()) {
+            return new InvestigationStep(
+                    stepId,
+                    rs.getString("step_code"),
+                    rs.getString("step_name"),
+                    rs.getInt("step_order"),
+                    rs.getString("method_text"),
+                    rs.getString("rule_text"),
+                    OperatorType.valueOf(rs.getString("operator_type")),
+                    ClientType.parseCsv(rs.getString("applicable_client_types")),
+                    dataRequirements,
+                    thresholdProfile,
+                    decisionPolicy,
+                    reportMapping
+            );
+        }
         return new InvestigationStep(
                 stepId,
                 rs.getString("step_code"),
@@ -102,10 +117,49 @@ public class JdbcIndicatorModelRepository implements IndicatorModelRepository {
                 rs.getString("rule_text"),
                 OperatorType.valueOf(rs.getString("operator_type")),
                 ClientType.parseCsv(rs.getString("applicable_client_types")),
-                loadRequirements(stepId),
+                dataRequirements,
                 thresholdProfile,
-                new DecisionPolicy(rs.getString("judgment_basis"), rs.getBoolean("manual_review_required")),
-                new ReportMapping(rs.getString("report_field"), rs.getString("result_target"))
+                decisionPolicy,
+                reportMapping,
+                verificationItems
+        );
+    }
+
+    private List<VerificationItem> loadVerificationItems(Long stepId) {
+        return jdbcTemplate.query("""
+                        SELECT id, item_code, item_name, item_order, method_text, rule_text, operator_type,
+                               applicable_client_types, thresholds_json, judgment_basis, manual_review_required
+                        FROM rule_verification_item
+                        WHERE step_id = ?
+                        ORDER BY item_order, id
+                        """,
+                (rs, rowNum) -> {
+                    Long itemId = rs.getLong("id");
+                    return new VerificationItem(
+                            itemId,
+                            rs.getString("item_code"),
+                            rs.getString("item_name"),
+                            rs.getInt("item_order"),
+                            rs.getString("method_text"),
+                            rs.getString("rule_text"),
+                            OperatorType.valueOf(rs.getString("operator_type")),
+                            ClientType.parseCsv(rs.getString("applicable_client_types")),
+                            loadVerificationItemRequirements(itemId),
+                            thresholdProfile(rs.getString("thresholds_json")),
+                            new DecisionPolicy(rs.getString("judgment_basis"), rs.getBoolean("manual_review_required"))
+                    );
+                },
+                stepId
+        );
+    }
+
+    private ThresholdProfile thresholdProfile(String thresholdsJson) {
+        Map<String, Object> thresholdMap = jsonSupport.readMap(thresholdsJson);
+        return new ThresholdProfile(
+                (String) thresholdMap.get("metric"),
+                jsonSupport.decimalValue(thresholdMap, "min"),
+                jsonSupport.decimalValue(thresholdMap, "max"),
+                thresholdMap
         );
     }
 
@@ -117,18 +171,35 @@ public class JdbcIndicatorModelRepository implements IndicatorModelRepository {
                         WHERE step_id = ?
                         ORDER BY id
                         """,
-                (rs, rowNum) -> new DataRequirement(
-                        rs.getLong("id"),
-                        rs.getString("requirement_code"),
-                        rs.getString("domain"),
-                        RequirementScope.fromCode(rs.getString("scope_type")),
-                        DataGrain.fromCode(rs.getString("grain")),
-                        jsonSupport.readMap(rs.getString("filters_json")),
-                        jsonSupport.readStringList(rs.getString("fields_json")),
-                        rs.getInt("sample_limit"),
-                        MissingDataPolicy.fromCode(rs.getString("missing_data_policy"))
-                ),
+                this::mapRequirement,
                 stepId
+        );
+    }
+
+    private List<DataRequirement> loadVerificationItemRequirements(Long itemId) {
+        return jdbcTemplate.query("""
+                        SELECT id, requirement_code, domain, scope_type, grain, filters_json, fields_json,
+                               sample_limit, missing_data_policy
+                        FROM rule_verification_data_requirement
+                        WHERE verification_item_id = ?
+                        ORDER BY id
+                        """,
+                this::mapRequirement,
+                itemId
+        );
+    }
+
+    private DataRequirement mapRequirement(ResultSet rs, int rowNum) throws SQLException {
+        return new DataRequirement(
+                rs.getLong("id"),
+                rs.getString("requirement_code"),
+                rs.getString("domain"),
+                RequirementScope.fromCode(rs.getString("scope_type")),
+                DataGrain.fromCode(rs.getString("grain")),
+                jsonSupport.readMap(rs.getString("filters_json")),
+                jsonSupport.readStringList(rs.getString("fields_json")),
+                rs.getInt("sample_limit"),
+                MissingDataPolicy.fromCode(rs.getString("missing_data_policy"))
         );
     }
 
