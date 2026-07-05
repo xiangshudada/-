@@ -1,0 +1,4 @@
+interface:
+  display_name: "AML Rule Engine Architecture"
+  short_description: "AML engine architecture and operator boundaries"
+  default_prompt: "Use $aml-rule-engine-architecture when changing the AML rule engine architecture, adding operators, or deciding where a suspicious-transaction requirement belongs."
