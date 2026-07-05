@@ -81,6 +81,9 @@ public class ThresholdCompareOperator implements RuleOperator {
                 foundTransfer = true;
             }
         }
+        if (!foundTransfer && facts.stream().anyMatch(fact -> "FundTransfer".equals(fact.domain()))) {
+            return BigDecimal.ZERO;
+        }
         return foundTransfer ? netAmount : null;
     }
 }

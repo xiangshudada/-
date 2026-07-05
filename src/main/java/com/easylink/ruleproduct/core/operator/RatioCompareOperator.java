@@ -114,6 +114,9 @@ public class RatioCompareOperator implements RuleOperator {
                 expectedAmount = expectedAmount.add(amount.abs());
             }
         }
+        if (totalAmount.compareTo(BigDecimal.ZERO) == 0 && hasDomain(facts, "FundTransfer")) {
+            return BigDecimal.ZERO;
+        }
         return OperatorSupport.divide(expectedAmount, totalAmount);
     }
 
@@ -127,5 +130,9 @@ public class RatioCompareOperator implements RuleOperator {
                     .orElse(BigDecimal.ZERO));
         }
         return OperatorSupport.divide(tradeAmount, marketAmount);
+    }
+
+    private boolean hasDomain(List<Fact> facts, String domain) {
+        return facts.stream().anyMatch(fact -> domain.equals(fact.domain()));
     }
 }

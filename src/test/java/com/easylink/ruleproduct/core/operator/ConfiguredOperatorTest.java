@@ -40,6 +40,29 @@ class ConfiguredOperatorTest {
     }
 
     @Test
+    void ratioCompareShouldTreatEmptyFundTransferDatasetAsZeroRatio() {
+        var step = step(OperatorType.RATIO_COMPARE, new ThresholdProfile(
+                "postTradeTransferOutRatio",
+                new BigDecimal("0.80"),
+                null,
+                Map.of()
+        ));
+        Fact fact = new Fact(
+                "FundTransferFact",
+                "FundTransfer",
+                Map.of("count", 0),
+                List.of(),
+                DataQuality.missing("test", "No rows returned")
+        );
+
+        var result = new RatioCompareOperator().evaluate(step, List.of(fact));
+
+        assertThat(result.status()).isEqualTo(DecisionStatus.NOT_HIT);
+        assertThat(result.details()).containsEntry("ratio", BigDecimal.ZERO);
+    }
+
+
+    @Test
     void priceDeviationShouldCalculateDeviationAgainstBenchmarkPrice() {
         var step = step(OperatorType.PRICE_DEVIATION, new ThresholdProfile(
                 "priceDeviationRate",
@@ -87,6 +110,27 @@ class ConfiguredOperatorTest {
         Fact transferFact = fact("FundTransfer", List.of(Map.of("direction", "OUT", "amount", new BigDecimal("900"))));
 
         var result = new SequencePatternOperator().evaluate(step, List.of(tradeFact, transferFact));
+
+        assertThat(result.status()).isEqualTo(DecisionStatus.HIT);
+    }
+
+    @Test
+    void sequencePatternShouldCompareConfiguredDayMetric() {
+        var step = step(OperatorType.SEQUENCE_PATTERN, new ThresholdProfile(
+                "emptyToCloseAccountDays",
+                null,
+                new BigDecimal("30"),
+                Map.of()
+        ));
+        Fact fact = new Fact(
+                "CustomerProfileFact",
+                "CustomerProfile",
+                Map.of("emptyToCloseAccountDays", new BigDecimal("20")),
+                List.of(),
+                DataQuality.complete("test")
+        );
+
+        var result = new SequencePatternOperator().evaluate(step, List.of(fact));
 
         assertThat(result.status()).isEqualTo(DecisionStatus.HIT);
     }

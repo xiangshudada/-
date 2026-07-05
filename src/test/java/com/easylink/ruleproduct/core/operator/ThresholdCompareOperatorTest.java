@@ -118,4 +118,35 @@ class ThresholdCompareOperatorTest {
         assertThat(result.status()).isEqualTo(DecisionStatus.HIT);
         assertThat(result.details()).containsEntry("value", new BigDecimal("700000"));
     }
+
+    @Test
+    void shouldTreatEmptyFundTransferDatasetAsZeroNetInflow() {
+        ThresholdCompareOperator operator = new ThresholdCompareOperator();
+        InvestigationStep step = new InvestigationStep(
+                1L,
+                "STEP",
+                "threshold step",
+                1,
+                "",
+                "",
+                OperatorType.THRESHOLD_COMPARE,
+                Set.of(ClientType.PERSON),
+                List.of(),
+                new ThresholdProfile("shortTermNetInflowAmount", new BigDecimal("500000"), null, Map.of()),
+                new DecisionPolicy("", false),
+                new ReportMapping("疑点分析", null)
+        );
+        Fact fact = new Fact(
+                "FundTransferFact",
+                "FundTransfer",
+                Map.of("count", 0),
+                List.of(),
+                DataQuality.missing("test", "No rows returned")
+        );
+
+        var result = operator.evaluate(step, List.of(fact));
+
+        assertThat(result.status()).isEqualTo(DecisionStatus.NOT_HIT);
+        assertThat(result.details()).containsEntry("value", BigDecimal.ZERO);
+    }
 }
