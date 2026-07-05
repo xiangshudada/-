@@ -15,11 +15,7 @@ public class FactFactory {
     public Fact fromDataset(DomainDataset dataset, int sampleLimit) {
         Map<String, Object> metrics = new LinkedHashMap<>();
         metrics.put("count", dataset.count());
-        metrics.put("totalAmount", dataset.sum("amount"));
-        metrics.put("totalQuantity", dataset.sum("quantity"));
-        putFirstNumericMetric(dataset, metrics, "age");
-        putFirstNumericMetric(dataset, metrics, "annualIncome");
-        putFirstNumericMetric(dataset, metrics, "registeredCapital");
+        putStandardFieldMetrics(dataset, metrics);
 
         List<Map<String, Object>> samples = dataset.rows().stream()
                 .limit(Math.max(sampleLimit, 0))
@@ -30,13 +26,23 @@ public class FactFactory {
         return new Fact(dataset.domain() + "Fact", dataset.domain(), metrics, samples, quality);
     }
 
-    private void putFirstNumericMetric(DomainDataset dataset, Map<String, Object> metrics, String key) {
+    private void putStandardFieldMetrics(DomainDataset dataset, Map<String, Object> metrics) {
+        Map<String, BigDecimal> totals = new LinkedHashMap<>();
         for (Map<String, Object> row : dataset.rows()) {
-            Object value = row.get(key);
-            if (value instanceof Number number) {
-                metrics.put(key, new BigDecimal(number.toString()));
-                return;
+            for (Map.Entry<String, Object> entry : row.entrySet()) {
+                String key = entry.getKey();
+                Object value = entry.getValue();
+                if (value instanceof Number number) {
+                    BigDecimal decimal = new BigDecimal(number.toString());
+                    metrics.putIfAbsent(key, decimal);
+                    totals.merge("total" + Character.toUpperCase(key.charAt(0)) + key.substring(1), decimal, BigDecimal::add);
+                } else if (value instanceof String || value instanceof Boolean) {
+                    metrics.putIfAbsent(key, value);
+                }
             }
         }
+        metrics.putAll(totals);
+        metrics.putIfAbsent("totalAmount", dataset.sum("amount"));
+        metrics.putIfAbsent("totalQuantity", dataset.sum("quantity"));
     }
 }

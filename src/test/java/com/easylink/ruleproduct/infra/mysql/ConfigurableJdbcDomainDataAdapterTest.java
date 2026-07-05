@@ -1,10 +1,6 @@
 package com.easylink.ruleproduct.infra.mysql;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import com.easylink.ruleproduct.core.adapter.DomainDataset;
 import com.easylink.ruleproduct.core.adapter.QueryContext;
@@ -15,9 +11,10 @@ import com.easylink.ruleproduct.core.model.DataRequirement;
 import com.easylink.ruleproduct.core.model.MissingDataPolicy;
 import com.easylink.ruleproduct.core.model.RequirementScope;
 import java.math.BigDecimal;
+import java.lang.reflect.Proxy;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDate;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,9 +26,7 @@ import org.springframework.jdbc.core.RowMapper;
 class ConfigurableJdbcDomainDataAdapterTest {
 
     @Test
-    @SuppressWarnings("unchecked")
-    void shouldProjectTenantColumnsToCanonicalDataset() throws Exception {
-        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+    void shouldProjectTenantColumnsToCanonicalDataset() {
         DomainBindingRepository repository = (tenantId, profile, domain) -> Optional.of(new DomainBinding(
                 1L,
                 tenantId,
@@ -53,17 +48,24 @@ class ConfigurableJdbcDomainDataAdapterTest {
         ));
         AtomicReference<String> sql = new AtomicReference<>();
         AtomicReference<Object[]> args = new AtomicReference<>();
-        when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenAnswer(invocation -> {
-            sql.set(invocation.getArgument(0));
-            args.set(Arrays.copyOfRange(invocation.getArguments(), 2, invocation.getArguments().length));
-            RowMapper<Map<String, Object>> mapper = invocation.getArgument(1);
-            ResultSet rs = mock(ResultSet.class);
-            when(rs.getObject("cust_no")).thenReturn("C001");
-            when(rs.getObject("init_date")).thenReturn(java.sql.Date.valueOf("2026-06-24"));
-            when(rs.getObject("bs_flag")).thenReturn("1");
-            when(rs.getObject("match_amt")).thenReturn(new BigDecimal("1200.00"));
-            return List.of(mapper.mapRow(rs, 0));
-        });
+        JdbcTemplate jdbcTemplate = new JdbcTemplate() {
+            @Override
+            public <T> List<T> query(String querySql, RowMapper<T> rowMapper, Object... queryArgs) {
+                sql.set(querySql);
+                args.set(queryArgs);
+                try {
+                    ResultSet rs = resultSet(Map.of(
+                            "cust_no", "C001",
+                            "init_date", java.sql.Date.valueOf("2026-06-24"),
+                            "bs_flag", "1",
+                            "match_amt", new BigDecimal("1200.00")
+                    ));
+                    return List.of(rowMapper.mapRow(rs, 0));
+                } catch (SQLException ex) {
+                    throw new IllegalStateException(ex);
+                }
+            }
+        };
 
         ConfigurableJdbcDomainDataAdapter adapter = new ConfigurableJdbcDomainDataAdapter(jdbcTemplate, repository);
         DataRequirement requirement = new DataRequirement(
@@ -112,5 +114,24 @@ class ConfigurableJdbcDomainDataAdapterTest {
     void shouldRejectUnsafeIdentifiers() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> SqlIdentifier.requireQualified("trade;drop"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private ResultSet resultSet(Map<String, Object> values) {
+        return (ResultSet) Proxy.newProxyInstance(
+                ResultSet.class.getClassLoader(),
+                new Class<?>[]{ResultSet.class},
+                (proxy, method, args) -> {
+                    if ("getObject".equals(method.getName())) {
+                        return values.get((String) args[0]);
+                    }
+                    if ("wasNull".equals(method.getName())) {
+                        return false;
+                    }
+                    if ("toString".equals(method.getName())) {
+                        return values.toString();
+                    }
+                    throw new UnsupportedOperationException("Unsupported ResultSet method: " + method.getName());
+                }
+        );
     }
 }

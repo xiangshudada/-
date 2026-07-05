@@ -31,6 +31,7 @@ description: Project-level guidance for the AML rule engine product. Use when Co
    - 新判断逻辑：新增 `RuleOperator`。
    - 新指标步骤：新增 `InvestigationStep`；同一步骤内多个自动核验条件新增 `VerificationItem`。
    - 报告组织：放到报告层，不放进算子。
+   - 第三方或外部数据暂缺：保留为空数据、人工核查或待补领域，不为了演示效果伪造外部事实。
 4. 修改后运行：
 
 ```bash
@@ -44,6 +45,7 @@ description: Project-level guidance for the AML rule engine product. Use when Co
 - `FactFactory` 只负责从领域数据形成事实指标和样本。
 - `InvestigationStep` 表达业务调查步骤；`VerificationItem` 表达可执行核验项和算子绑定。
 - `RuleOperator` 只负责根据核验项事实和配置做判断。
+- 复杂指标不能长期落在 `GenericNeutralOperator`；可自动判断的稳定语义应补通用算子，外部材料不足的语义留给 `MANUAL_REVIEW`。
 - `ReportMapping` 只负责报告字段归属，不负责业务判断。
 - Java 枚举用于引擎协议值；指标编码、步骤编码、领域名保留为可配置字符串。
 

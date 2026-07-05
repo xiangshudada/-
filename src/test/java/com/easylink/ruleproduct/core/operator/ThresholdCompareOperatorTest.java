@@ -48,4 +48,40 @@ class ThresholdCompareOperatorTest {
 
         assertThat(result.status()).isEqualTo(DecisionStatus.HIT);
     }
+
+    @Test
+    void shouldUseClientTypeThresholdWhenConfigured() {
+        ThresholdCompareOperator operator = new ThresholdCompareOperator();
+        InvestigationStep step = new InvestigationStep(
+                1L,
+                "STEP",
+                "threshold step",
+                1,
+                "",
+                "",
+                OperatorType.THRESHOLD_COMPARE,
+                Set.of(ClientType.PERSON),
+                List.of(),
+                new ThresholdProfile(
+                        "shortTermNetInflowAmount",
+                        null,
+                        null,
+                        Map.of("minByClientType", Map.of("PERSON", 500000, "ORG", 1000000))
+                ),
+                new DecisionPolicy("", false),
+                new ReportMapping("疑点分析", null)
+        );
+        Fact fact = new Fact(
+                "FundTransferFact",
+                "FundTransfer",
+                Map.of("clientType", "PERSON", "shortTermNetInflowAmount", new BigDecimal("600000")),
+                List.of(),
+                DataQuality.complete("test")
+        );
+
+        var result = operator.evaluate(step, List.of(fact));
+
+        assertThat(result.status()).isEqualTo(DecisionStatus.HIT);
+        assertThat(result.details()).containsEntry("min", new BigDecimal("500000"));
+    }
 }

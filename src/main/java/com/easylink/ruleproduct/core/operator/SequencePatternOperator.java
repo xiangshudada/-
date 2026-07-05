@@ -12,24 +12,25 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 @Component
-public class ThresholdCompareOperator implements RuleOperator {
+public class SequencePatternOperator implements RuleOperator {
 
     @Override
     public OperatorType type() {
-        return OperatorType.THRESHOLD_COMPARE;
+        return OperatorType.SEQUENCE_PATTERN;
     }
 
     @Override
     public DecisionResult evaluate(InvestigationStep step, List<Fact> facts) {
         String metric = step.thresholdProfile().metric();
+        BigDecimal value = metric == null ? null : OperatorSupport.numberField(facts, metric).orElse(null);
         BigDecimal min = OperatorSupport.thresholdMin(step.thresholdProfile(), facts);
         BigDecimal max = OperatorSupport.thresholdMax(step.thresholdProfile(), facts);
-        if (metric == null || (min == null && max == null)) {
-            return new DecisionResult(DecisionStatus.DATA_MISSING, "缺少阈值配置，无法判断。", Map.of());
+        if (value == null && step.thresholdProfile().raw().get("sequence") instanceof List<?>) {
+            value = sequencePresent(facts) ? BigDecimal.ONE : BigDecimal.ZERO;
+            min = min == null ? BigDecimal.ONE : min;
         }
-        BigDecimal value = metricValue(metric, facts);
-        if (value == null) {
-            return new DecisionResult(DecisionStatus.DATA_MISSING, "缺少指标 " + metric + " 的事实值，无法判断。", Map.of());
+        if (value == null || (min == null && max == null)) {
+            return new DecisionResult(DecisionStatus.DATA_MISSING, "缺少时序指标或阈值配置，无法判断。", Map.of());
         }
         boolean hit = (min != null && value.compareTo(min) >= 0)
                 || (max != null && value.compareTo(max) <= 0);
@@ -40,24 +41,20 @@ public class ThresholdCompareOperator implements RuleOperator {
         details.put("max", max);
         return new DecisionResult(
                 hit ? DecisionStatus.HIT : DecisionStatus.NOT_HIT,
-                metric + "=" + value + "，阈值区间[min=" + min + ", max=" + max + "]，判断结果=" + (hit ? "命中" : "未命中") + "。",
+                "时序指标=" + value + "，阈值区间[min=" + min + ", max=" + max + "]，判断结果=" + (hit ? "命中" : "未命中") + "。",
                 details
         );
     }
 
-    private BigDecimal metricValue(String metric, List<Fact> facts) {
-        BigDecimal value = BigDecimal.ZERO;
-        boolean found = false;
-        for (Fact fact : facts) {
-            Object metricValue = fact.metrics().get(metric);
-            if (metricValue instanceof Number number) {
-                value = value.add(new BigDecimal(number.toString()));
-                found = true;
-            }
+    private boolean sequencePresent(List<Fact> facts) {
+        boolean hasTrade = false;
+        boolean hasTransferOut = false;
+        for (Map<String, Object> sample : OperatorSupport.samples(facts)) {
+            Object tradeMode = sample.get("tradeMode");
+            Object direction = sample.get("direction");
+            hasTrade = hasTrade || tradeMode instanceof String;
+            hasTransferOut = hasTransferOut || (direction instanceof String text && "OUT".equalsIgnoreCase(text.trim()));
         }
-        if (found) {
-            return value;
-        }
-        return OperatorSupport.numberField(facts, metric).orElse(null);
+        return hasTrade && hasTransferOut;
     }
 }
