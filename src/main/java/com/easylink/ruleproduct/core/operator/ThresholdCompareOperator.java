@@ -58,6 +58,29 @@ public class ThresholdCompareOperator implements RuleOperator {
         if (found) {
             return value;
         }
+        if ("shortTermNetInflowAmount".equals(metric)) {
+            return shortTermNetInflowAmount(facts);
+        }
         return OperatorSupport.numberField(facts, metric).orElse(null);
+    }
+
+    private BigDecimal shortTermNetInflowAmount(List<Fact> facts) {
+        BigDecimal netAmount = BigDecimal.ZERO;
+        boolean foundTransfer = false;
+        for (Map<String, Object> sample : OperatorSupport.samples(facts)) {
+            BigDecimal amount = OperatorSupport.asNumber(sample.get("amount")).orElse(null);
+            Object direction = sample.get("direction");
+            if (amount == null || !(direction instanceof String text)) {
+                continue;
+            }
+            if ("IN".equalsIgnoreCase(text.trim())) {
+                netAmount = netAmount.add(amount.abs());
+                foundTransfer = true;
+            } else if ("OUT".equalsIgnoreCase(text.trim())) {
+                netAmount = netAmount.subtract(amount.abs());
+                foundTransfer = true;
+            }
+        }
+        return foundTransfer ? netAmount : null;
     }
 }

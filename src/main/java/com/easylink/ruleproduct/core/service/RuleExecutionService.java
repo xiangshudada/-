@@ -4,6 +4,7 @@ import com.easylink.ruleproduct.api.dto.RuleExecutionRequest;
 import com.easylink.ruleproduct.core.adapter.DomainDataAdapterRegistry;
 import com.easylink.ruleproduct.core.adapter.DomainDataset;
 import com.easylink.ruleproduct.core.adapter.QueryContext;
+import com.easylink.ruleproduct.core.model.ClientType;
 import com.easylink.ruleproduct.core.model.DataGrain;
 import com.easylink.ruleproduct.core.model.DataRequirement;
 import com.easylink.ruleproduct.core.model.DecisionResult;
@@ -158,7 +159,9 @@ public class RuleExecutionService {
                     .map(requirement -> sectionData.factFor(requirement))
                     .toList();
             InvestigationStep itemStep = step.viewFor(item);
-            DecisionResult decision = operatorRegistry.get(item.operatorType()).evaluate(itemStep, facts);
+            DecisionResult decision = isApplicable(item, facts)
+                    ? operatorRegistry.get(item.operatorType()).evaluate(itemStep, facts)
+                    : notApplicableDecision(item, facts);
             results.add(new VerificationExecutionResult(
                     item.itemId(),
                     item.itemCode(),
@@ -169,6 +172,56 @@ public class RuleExecutionService {
             ));
         }
         return results;
+    }
+
+    private boolean isApplicable(VerificationItem item, List<Fact> facts) {
+        if (item.applicableClientTypes().isEmpty()) {
+            return true;
+        }
+        return actualClientType(facts)
+                .map(item.applicableClientTypes()::contains)
+                .orElse(true);
+    }
+
+    private java.util.Optional<ClientType> actualClientType(List<Fact> facts) {
+        for (Fact fact : facts) {
+            java.util.Optional<ClientType> type = clientType(fact.metrics().get("clientType"));
+            if (type.isPresent()) {
+                return type;
+            }
+            for (Map<String, Object> sample : fact.samples()) {
+                type = clientType(sample.get("clientType"));
+                if (type.isPresent()) {
+                    return type;
+                }
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    private java.util.Optional<ClientType> clientType(Object value) {
+        if (value instanceof ClientType type) {
+            return java.util.Optional.of(type);
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return java.util.Optional.of(ClientType.valueOf(text.trim()));
+            } catch (IllegalArgumentException ignored) {
+                return java.util.Optional.empty();
+            }
+        }
+        return java.util.Optional.empty();
+    }
+
+    private DecisionResult notApplicableDecision(VerificationItem item, List<Fact> facts) {
+        return new DecisionResult(
+                DecisionStatus.NOT_HIT,
+                item.itemName() + "：当前客户类型不适用该核验项。",
+                Map.of(
+                        "applicableClientTypes", item.applicableClientTypes(),
+                        "factCount", facts.size()
+                )
+        );
     }
 
     private DecisionResult aggregateStepDecision(InvestigationStep step, List<VerificationExecutionResult> results) {

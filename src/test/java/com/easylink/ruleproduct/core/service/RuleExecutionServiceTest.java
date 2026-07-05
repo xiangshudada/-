@@ -23,6 +23,7 @@ import com.easylink.ruleproduct.core.model.ThresholdProfile;
 import com.easylink.ruleproduct.core.model.VerificationItem;
 import com.easylink.ruleproduct.core.operator.ObjectiveDescribeOperator;
 import com.easylink.ruleproduct.core.operator.RuleOperatorRegistry;
+import com.easylink.ruleproduct.core.operator.ThresholdCompareOperator;
 import com.easylink.ruleproduct.core.repository.ExecutionResultRepository;
 import com.easylink.ruleproduct.core.repository.IndicatorModelRepository;
 import java.math.BigDecimal;
@@ -241,5 +242,112 @@ class RuleExecutionServiceTest {
         assertThat(result.steps().get(0).verificationResults()).hasSize(2);
         assertThat(result.steps().get(0).verificationResults().get(0).facts().get(0).samples()).hasSize(1);
         assertThat(result.steps().get(0).verificationResults().get(1).facts().get(0).samples()).hasSize(2);
+    }
+
+    @Test
+    void shouldSkipVerificationItemWhenClientTypeDoesNotApply() {
+        DataRequirement profileRequirement = new DataRequirement(
+                101L,
+                "REQ_PROFILE",
+                "CustomerProfile",
+                RequirementScope.ALERT_DETAIL,
+                DataGrain.ACCOUNT_SUMMARY,
+                Map.of(),
+                List.of("clientType", "annualIncome"),
+                1,
+                MissingDataPolicy.RETURN_EMPTY_WITH_REASON
+        );
+        VerificationItem personItem = new VerificationItem(
+                201L,
+                "ITEM_PERSON",
+                "个人收入核验",
+                1,
+                "",
+                "",
+                OperatorType.THRESHOLD_COMPARE,
+                Set.of(ClientType.PERSON),
+                List.of(profileRequirement),
+                new ThresholdProfile("annualIncome", new BigDecimal("100000"), null, Map.of()),
+                new DecisionPolicy("", false)
+        );
+        VerificationItem orgItem = new VerificationItem(
+                202L,
+                "ITEM_ORG",
+                "机构注册资本核验",
+                2,
+                "",
+                "",
+                OperatorType.THRESHOLD_COMPARE,
+                Set.of(ClientType.ORG),
+                List.of(profileRequirement),
+                new ThresholdProfile("registeredCapital", new BigDecimal("1000000"), null, Map.of()),
+                new DecisionPolicy("", false)
+        );
+        IndicatorModelRepository modelRepository = indicatorCode -> new IndicatorModel(
+                indicatorCode,
+                "sample indicator",
+                "SAMPLE",
+                "v1",
+                List.of(new RiskSection(
+                        1L,
+                        "基础调查",
+                        "-",
+                        "客户类型过滤",
+                        1,
+                        List.of(new InvestigationStep(
+                                11L,
+                                "STEP_PROFILE",
+                                "客户画像核验",
+                                1,
+                                "",
+                                "",
+                                OperatorType.THRESHOLD_COMPARE,
+                                Set.of(ClientType.PERSON, ClientType.ORG),
+                                List.of(),
+                                ThresholdProfile.empty(),
+                                new DecisionPolicy("", false),
+                                new ReportMapping("疑点分析", null),
+                                List.of(personItem, orgItem)
+                        ))
+                ))
+        );
+        DomainDataAdapter adapter = new DomainDataAdapter() {
+            @Override
+            public boolean supports(String domain) {
+                return "CustomerProfile".equals(domain);
+            }
+
+            @Override
+            public DomainDataset query(DataRequirement requirement, QueryContext context) {
+                return new DomainDataset(
+                        requirement.domain(),
+                        context.tenantId(),
+                        List.of(Map.of("clientType", "PERSON", "annualIncome", new BigDecimal("200000")))
+                );
+            }
+        };
+        RuleExecutionService service = new RuleExecutionService(
+                modelRepository,
+                new DomainDataAdapterRegistry(List.of(adapter)),
+                new RuleOperatorRegistry(List.of(new ThresholdCompareOperator())),
+                new FactFactory(),
+                result -> {
+                }
+        );
+
+        ExecutionResult result = service.execute(new RuleExecutionRequest(
+                "tenant-a",
+                "prod",
+                "1214_1001",
+                "C001",
+                LocalDate.parse("2026-06-24"),
+                null,
+                null
+        ));
+
+        assertThat(result.steps().get(0).verificationResults()).hasSize(2);
+        assertThat(result.steps().get(0).verificationResults().get(0).decision().status()).isEqualTo(com.easylink.ruleproduct.core.model.DecisionStatus.HIT);
+        assertThat(result.steps().get(0).verificationResults().get(1).decision().status()).isEqualTo(com.easylink.ruleproduct.core.model.DecisionStatus.NOT_HIT);
+        assertThat(result.steps().get(0).verificationResults().get(1).decision().summary()).contains("不适用");
     }
 }
